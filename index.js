@@ -16,46 +16,82 @@ app.post('/api/consultar', async (req, res) => {
     const page = await context.newPage();
 
     try {
-        await page.goto('https://app.ssotica.com.br/');
-        await page.fill('input[name="email"]', process.env.SSOTICA_EMAIL);
-        await page.fill('input[name="password"]', process.env.SSOTICA_PASSWORD);
-        await page.click('button[type="submit"]');
-        await page.waitForNavigation();
+        // Acessa a página de login
+        await page.goto('https://app.ssotica.com.br', { waitUntil: 'domcontentloaded' });
 
-        await page.goto('https://app.ssotica.com.br/financeiro/contas-a-receber/LwlRRM/listar');
-        await page.waitForTimeout(3000);
+        // Preenche login
+        await page.waitForSelector('#email');
+        await page.fill('#email', process.env.SSOTICA_EMAIL);
 
-        await page.fill('input[placeholder="Pesquise pelo nome ou apelido"]', nome);
+        await page.waitForSelector('#senha');
+        await page.fill('#senha', process.env.SSOTICA_PASSWORD);
+
+        await page.waitForSelector('button.button.bgBlue');
+        await page.click('button.button.bgBlue');
+
+        // Aguarda navegação após login
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+
+        // Vai para Contas a Receber
+        await page.goto('https://app.ssotica.com.br/financeiro/contas-a-receber/LwlRRM/listar', { waitUntil: 'domcontentloaded' });
+
+        // Preenche campo de busca
+        await page.waitForSelector('input[name="searchTerm_Parcelamento"]');
+        await page.fill('input[name="searchTerm_Parcelamento"]', nome);
+
+        // Garante que o tipo de busca está como nome/apelido
+        await page.selectOption('select[name="searchTermSelect_Parcelamento"]', 'nome_apelido');
+
+        // Clica em buscar
         await page.click('button:has-text("Buscar")');
+
+        // Aguarda carregar resultados
         await page.waitForTimeout(3000);
 
-        const parcelas = await page.$$eval('.panel', cards => {
-            return cards.map(card => {
-                const nomeCliente = card.querySelector('strong')?.innerText.trim();
-                const venda = card.innerText.match(/Venda nº (\d+)/)?.[1] || '';
-                const valor = card.innerText.match(/R\$ [\d.,]+/)?.[0] || '';
-                const vencimento = card.innerText.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || '';
-                const status = card.querySelector('.label')?.innerText.trim() || '';
-                const descricao = (card.innerText.match(/Parcela .*$/) || [])[0] || '';
+        // Extrai parcelas
+        const parcelas = await page.$$eval('li.item-conta-a-receber', items => {
+            return items.map(item => {
+                const descricao = item.querySelector('.descricao-conta-a-receber')?.innerText.trim() || '';
+                const venda = item.innerText.match(/Venda nº (\d+)/)?.[1] || '';
+                const valor = item.querySelector('.valor-conta-a-receber')?.innerText.trim() || '';
+                const vencimento = item.innerText.match(/Vencimento: (\\d{2}\\/\\d{2}\\/\\d{4})/)?.[1] || '';
+                const status = item.querySelector('.status-conta-a-receber')?.innerText.trim() || '';
 
-                return { nomeCliente, venda, valor, vencimento, status, descricao };
+                return { descricao, venda, valor, vencimento, status };
             });
         });
 
         await browser.close();
 
-        if (parcelas.length === 0) {
+        if (!parcelas.length) {
             return res.status(404).json({ message: 'Nenhuma parcela encontrada.' });
         }
 
-        res.json({
+        // Filtra parcelas que estão em aberto ou em atraso
+        const parcelasFiltradas = parcelas.filter(p =>
+            p.status.toLowerCase().includes('aberto') ||
+            p.status.toLowerCase().includes('atraso')
+        );
+
+        if (!parcelasFiltradas.length) {
+            return res.status(404).json({ message: 'Nenhuma parcela em aberto ou em atraso encontrada.' });
+        }
+
+        // Ordena pela data de vencimento (mais próxima primeiro)
+        const parcelaAtual = parcelasFiltradas.sort((a, b) => {
+            const dateA = new Date(a.vencimento.split('/').reverse().join('-'));
+            const dateB = new Date(b.vencimento.split('/').reverse().join('-'));
+            return dateA - dateB;
+        })[0];
+
+        return res.json({
             cliente: nome,
-            parcelas
+            parcela_atual: parcelaAtual
         });
 
     } catch (error) {
         await browser.close();
-        res.status(500).json({ error: error.message });
+        return res.status(500).json({ error: error.message });
     }
 });
 
