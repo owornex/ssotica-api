@@ -178,6 +178,119 @@ app.post('/api/consultar', async (req, res) => {
     }
 });
 
+app.post('/api/baixar-parcela', async (req, res) => {
+    const { nome, venda, vencimento } = req.body;
+
+    if (!nome) {
+        return res.status(400).json({ error: 'O campo "nome" é obrigatório.' });
+    }
+    if (!venda) {
+        return res.status(400).json({ error: 'O campo "venda" é obrigatório.' });
+    }
+    if (!vencimento) {
+        return res.status(400).json({ error: 'O campo "vencimento" é obrigatório.' });
+    }
+
+    if (!browser) {
+        console.error('Browser not initialized when API was called for /api/baixar-parcela.');
+        return res.status(503).json({ error: 'Serviço temporariamente indisponível, navegador não inicializado.' });
+    }
+
+    let context;
+    try {
+        context = await browser.newContext();
+        const page = await context.newPage();
+
+        const baseUrl = process.env.SSOTICA_BASE_URL || 'https://app.ssotica.com.br';
+        const contasAReceberPath = process.env.SSOTICA_CONTAS_A_RECEBER_PATH || '/financeiro/contas-a-receber/LwlRRM/listar';
+        const searchTypeValue = process.env.SSOTICA_SEARCH_TYPE_VALUE || 'nome_apelido';
+        const waitForResultsTimeout = parseInt(process.env.WAIT_FOR_RESULTS_TIMEOUT || '10000', 10);
+
+        // --- Login Steps ---
+        try {
+            await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('#email');
+            await page.fill('#email', process.env.SSOTICA_EMAIL);
+            await page.waitForSelector('#senha');
+            await page.fill('#senha', process.env.SSOTICA_PASSWORD);
+            await page.waitForSelector('button.button.bgBlue');
+            await page.click('button.button.bgBlue');
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+        } catch (loginError) {
+            console.error(`Erro ao tentar fazer login para o cliente: ${nome} (Baixar Parcela):`, loginError);
+            return res.status(500).json({ error: "Falha ao realizar login no sistema externo." });
+        }
+
+        // --- Navigation and Search ---
+        try {
+            await page.goto(`${baseUrl}${contasAReceberPath}`, { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('input[name="searchTerm_Parcelamento"]');
+            await page.fill('input[name="searchTerm_Parcelamento"]', nome);
+            await page.selectOption('select[name="searchTermSelect_Parcelamento"]', searchTypeValue);
+            await page.click('button:has-text("Buscar")');
+            await page.waitForSelector('li.item-conta-a-receber', { timeout: waitForResultsTimeout });
+        } catch (navError) {
+            console.warn(`Nenhum resultado encontrado para o cliente ${nome} ao tentar baixar parcela, ou erro de navegação.`);
+            return res.status(404).json({ error: `Nenhuma parcela encontrada para o cliente ${nome} ou erro na navegação.` });
+        }
+
+        // --- Locate and Write-Off Installment ---
+        const installmentItems = await page.$$('li.item-conta-a-receber');
+        let parcelaEncontrada = false;
+        let baixaRealizada = false;
+
+        for (const item of installmentItems) {
+            const itemVendaText = await item.innerText();
+            const itemVenda = itemVendaText.match(/Venda nº (\d+)/)?.[1];
+            const itemVencimento = itemVendaText.match(/Vencimento: (\d{2}\/\d{2}\/\d{4})/)?.[1];
+
+            if (itemVenda === venda && itemVencimento === vencimento) {
+                parcelaEncontrada = true;
+                try {
+                    // Tentativa de encontrar um botão de "Baixar". Pode precisar de ajuste.
+                    // Common keywords: Baixar, Pagar, Quitar, Confirmar Pagamento, Dar Baixa
+                    const baixarButton = await item.$('button:has-text("Baixar"), button:has-text("Pagar"), button:has-text("Quitar"), [aria-label*="Baixar"], [title*="Baixar"]');
+                    if (baixarButton) {
+                        await baixarButton.click();
+                        // Adicionar uma pequena espera para a ação ser processada (idealmente esperar por um elemento específico)
+                        await page.waitForTimeout(3000); // 3 segundos, ajuste conforme necessário
+                        baixaRealizada = true;
+                        // Poderia adicionar uma verificação aqui se a baixa foi bem sucedida (ex: status mudou)
+                    } else {
+                        console.warn(`Botão de baixa não encontrado para a parcela Venda: ${venda}, Vencimento: ${vencimento}`);
+                        return res.status(500).json({ error: "Ação de baixa não encontrada para a parcela." });
+                    }
+                } catch (clickError) {
+                    console.error(`Erro ao tentar clicar no botão de baixa para Venda: ${venda}, Vencimento: ${vencimento}:`, clickError);
+                    return res.status(500).json({ error: "Erro ao tentar realizar a baixa da parcela." });
+                }
+                break;
+            }
+        }
+
+        if (!parcelaEncontrada) {
+            return res.status(404).json({ error: "Parcela não encontrada com os detalhes fornecidos." });
+        }
+
+        if (baixaRealizada) {
+            return res.json({ message: "Baixa da parcela solicitada com sucesso." });
+        } else {
+            // Este caso pode ocorrer se a parcela foi encontrada, mas o botão não (já tratado acima)
+            // ou se a lógica de baixaRealizada não for setada corretamente.
+            // É um fallback, idealmente o `return` dentro do loop já teria lidado com o botão não encontrado.
+            return res.status(500).json({ error: "Não foi possível confirmar a baixa da parcela." });
+        }
+
+    } catch (error) {
+        console.error(`Erro inesperado na API /api/baixar-parcela para o cliente ${nome}:`, error);
+        return res.status(500).json({ error: "Ocorreu um erro ao processar a solicitação de baixa." });
+    } finally {
+        if (context) {
+            await context.close();
+        }
+    }
+});
+
 const PORT = process.env.PORT || 3189;
 
 // Inicializa o browser e então inicia o servidor, apenas se o script for executado diretamente
