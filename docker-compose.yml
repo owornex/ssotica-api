@@ -1,0 +1,11 @@
+version: '3.8' # Specifies the Docker Compose file format version
+
+services:
+  ssotica-api:
+    build: . # Instructs Docker Compose to build an image from the Dockerfile in the current directory
+    container_name: ssotica-api-container # Assigns a specific name to the container
+    ports:
+      - "3189:3189" # Maps port 3189 of the host to port 3189 of the container
+    env_file:
+      - .env # Specifies that environment variables should be loaded from the .env file in the current directory
+    restart: unless-stopped # Configures the container to restart automatically unless it was explicitly stopped

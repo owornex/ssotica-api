@@ -86,6 +86,33 @@ Explicação do comando `docker run`:
 
 Após executar este comando, a API deverá estar acessível em `http://localhost:3189`.
 
+### Opção 2: Usando Docker Compose
+
+Docker Compose simplifica o gerenciamento de aplicações Docker, especialmente aquelas com múltiplos containers (embora aqui tenhamos um único serviço principal, ele padroniza a execução e configuração). Com o arquivo `docker-compose.yml` presente na raiz do projeto, você pode gerenciar a aplicação de forma mais declarativa.
+
+1.  **Certifique-se de que o arquivo `.env` está configurado:**
+    Assim como na execução manual com `docker run`, o Docker Compose utilizará o arquivo `.env` na raiz do projeto para carregar as variáveis de ambiente necessárias. Consulte a seção "Exemplo de arquivo `.env`" para mais detalhes.
+
+2.  **Iniciar a aplicação:**
+    Para construir a imagem (se ainda não construída) e iniciar o container, execute o seguinte comando na raiz do projeto:
+    ```bash
+    docker-compose up
+    ```
+    Este comando exibirá os logs da aplicação no terminal.
+
+    Para iniciar a aplicação em modo "detached" (em segundo plano), utilize:
+    ```bash
+    docker-compose up -d
+    ```
+
+3.  **Parar a aplicação:**
+    Para parar e remover os containers definidos no `docker-compose.yml`, execute:
+    ```bash
+    docker-compose down
+    ```
+
+Após iniciar com `docker-compose up`, a API também estará acessível em `http://localhost:3189`.
+
 ## Endpoint da API
 
 ### POST `/api/consultar`
