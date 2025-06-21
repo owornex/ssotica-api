@@ -225,8 +225,8 @@ if (require.main === module) {
             await initializeBrowser(); // Initialize the browser first
             // Start the Express server only after successful browser initialization
             if (browser) {
-                app.listen(PORT, () => {
-                    console.log(`API rodando na porta ${PORT}`);
+                app.listen(PORT, '0.0.0.0', () => {
+                    console.log(`API rodando em http://0.0.0.0:${PORT}`);
                 });
             } else {
                 // This case should ideally be handled by process.exit(1) in initializeBrowser
